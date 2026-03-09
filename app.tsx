@@ -12,21 +12,29 @@ function formatProgress(progress: number): string {
     return (progress * 100).toFixed(2) + "%";
 }
 
+interface Column {
+    name: string;
+    width: number;
+    render: (torrent: TorrentInfo) => string;
+}
+
+const columns: Column[] = [
+    { name: "Name", width: 10, render: (t) => t.name },
+    { name: "Size", width: 10, render: (t) => formatBytes(t.size) },
+    { name: "Progress", width: 10, render: (t) => formatProgress(t.progress) },
+];
+
 function TableRow({ torrent, selected }: { torrent: TorrentInfo, selected: boolean }) {
     return (
         <Box gap={1}>
             <Box width={1}>
                 <Text>{selected ? "*" : " "}</Text>
             </Box>
-            <Box width={10}>
-                <Text wrap="truncate">{torrent.name}</Text>
-            </Box>
-            <Box width={10}>
-                <Text>{formatBytes(torrent.size)}</Text>
-            </Box>
-            <Box width={10}>
-                <Text>{formatProgress(torrent.progress)}</Text>
-            </Box>
+            {columns.map((col) => (
+                <Box width={col.width} key={col.name}>
+                    <Text wrap="truncate">{col.render(torrent)}</Text>
+                </Box>
+            ))}
         </Box>
     )
 }
@@ -37,15 +45,11 @@ function TableHeader() {
             <Box width={1}>
                 <Text> </Text>
             </Box>
-            <Box width={10}>
-                <Text>Name</Text>
-            </Box>
-            <Box width={10}>
-                <Text>Size</Text>
-            </Box>
-            <Box width={10}>
-                <Text>Progress</Text>
-            </Box>
+            {columns.map((col) => (
+                <Box width={col.width} key={col.name}>
+                    <Text>{col.name}</Text>
+                </Box>
+            ))}
         </Box>
     )
 }
