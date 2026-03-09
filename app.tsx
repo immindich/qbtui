@@ -2,6 +2,19 @@ import { useState, useEffect, useRef, memo } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { getMainData, TransferInfo, type TorrentInfo } from "./api.js";
 
+function useTerminalSize() {
+    const { stdout } = useStdout();
+    const [size, setSize] = useState({ columns: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+
+    useEffect(() => {
+        const onResize = () => setSize({ columns: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+        stdout.on("resize", onResize);
+        return () => { stdout.off("resize", onResize); };
+    }, [stdout]);
+
+    return size;
+}
+
 function formatBytes(bytes: number): string {
     if (bytes === 0) return "0 B";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -11,6 +24,11 @@ function formatBytes(bytes: number): string {
 
 function formatProgress(progress: number): string {
     return (progress * 100).toFixed(2) + "%";
+}
+
+function padOrTruncate(str: string, width: number): string {
+    if (str.length > width) return str.slice(0, width);
+    return str.padEnd(width);
 }
 
 interface Column {
@@ -32,41 +50,26 @@ const columns: Column[] = [
 interface TableRowProps {
     torrent: TorrentInfo;
     selected: boolean;
+    screenWidth: number;
 }
 
-const TableRow = memo(function TableRow({ torrent, selected }: TableRowProps) {
-    return (
-        <Box gap={1}>
-            <Box width={1}>
-                <Text>{selected ? "*" : " "}</Text>
-            </Box>
-            {columns.map((col) => (
-                <Box width={col.width} key={col.name}>
-                    <Text wrap="truncate">{col.render(torrent)}</Text>
-                </Box>
-            ))}
-        </Box>
-    )
+const TableRow = memo(function TableRow({ torrent, selected, screenWidth }: TableRowProps) {
+    const line = (selected ? "* " : "  ") + columns.map((col) => padOrTruncate(col.render(torrent), col.width)).join(" ");
+    return <Text>{line.slice(0, screenWidth)}</Text>;
 });
 
 interface TableHeaderProps {
     sort_column: number;
     sort_ascending: boolean;
+    screenWidth: number;
 }
 
-function TableHeader({ sort_column, sort_ascending }: TableHeaderProps) {
-    return (
-        <Box gap={1}>
-            <Box width={1}>
-                <Text> </Text>
-            </Box>
-            {columns.map((col, i) => (
-                <Box width={col.width} key={col.name}>
-                    <Text>{col.name}{i === sort_column ? (sort_ascending ? " ▲" : " ▼") : ""}</Text>
-                </Box>
-            ))}
-        </Box>
-    )
+function TableHeader({ sort_column, sort_ascending, screenWidth }: TableHeaderProps) {
+    const line = "  " + columns.map((col, i) => {
+        const label = col.name + (i === sort_column ? (sort_ascending ? " ▲" : " ▼") : "");
+        return padOrTruncate(label, col.width);
+    }).join(" ");
+    return <Text>{line.slice(0, screenWidth)}</Text>;
 }
 
 interface StatusBarProps {
@@ -74,15 +77,12 @@ interface StatusBarProps {
     dl_info_data: number;
     up_info_speed: number;
     up_info_data: number;
+    screenWidth: number;
 }
 
-function StatusBar({ dl_info_speed, dl_info_data, up_info_speed, up_info_data }: StatusBarProps) {
-    return (
-        <Box gap={1}>
-            <Text>Download Speed: {formatBytes(dl_info_speed)}/s</Text>
-            <Text>Upload Speed: {formatBytes(up_info_speed)}/s</Text>
-        </Box>
-    )
+function StatusBar({ dl_info_speed, dl_info_data, up_info_speed, up_info_data, screenWidth }: StatusBarProps) {
+    const line = `Download Speed: ${formatBytes(dl_info_speed)}/s  Upload Speed: ${formatBytes(up_info_speed)}/s`;
+    return <Text>{line.slice(0, screenWidth)}</Text>;
 }
 
 interface TableProps {
@@ -100,9 +100,9 @@ function Table({ torrents, selected_torrent, scrollOffset, maxRows, sort_column,
 
     return (
         <Box flexDirection="column">
-            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} />
+            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} screenWidth={screenWidth} />
             <Text>{"─".repeat(screenWidth)}</Text>
-            {visible.map((torrent) => <TableRow torrent={torrent} key={torrent.hash} selected={torrent.hash === selected_torrent} />)}
+            {visible.map((torrent) => <TableRow torrent={torrent} key={torrent.hash} selected={torrent.hash === selected_torrent} screenWidth={screenWidth} />)}
         </Box>
     )
 }
@@ -145,6 +145,8 @@ export function App({ url, sid }: AppProps) {
     const [state, setState] = useState<TorrentState | null>(null);
     const ridRef = useRef(0);
     const scrollOffsetRef = useRef(0);
+    const { columns: screenWidth, rows: screenRows } = useTerminalSize();
+    const maxRows = screenRows - 5;
 
     const { exit } = useApp();
 
@@ -260,17 +262,18 @@ export function App({ url, sid }: AppProps) {
         return <Box width="100%" height="100%"><Text>Loading...</Text></Box>;
     }
 
-    const { stdout } = useStdout();
-    const screenWidth = stdout.columns ?? 80;
-    const maxRows = (stdout.rows ?? 24) - 5;
+    const maxScrollOffset = Math.max(0, state.torrents_sorted.length - maxRows);
+    if (scrollOffsetRef.current > maxScrollOffset) {
+        scrollOffsetRef.current = maxScrollOffset;
+    }
 
     return (
         <Box width="100%" height="100%" flexDirection="column">
             <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} scrollOffset={scrollOffsetRef.current} sort_column={state.sort_column} sort_ascending={state.sort_ascending} maxRows={maxRows} screenWidth={screenWidth} />
             <Box flexGrow={1} />
             <Text>{"─".repeat(screenWidth)}</Text>
-            <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} />
-            <Text>↑↓ navigate  PgUp/PgDn page  Home/End jump  ←→ sort column  s toggle order  q quit</Text>
+            <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
+            <Text>{"↑↓ navigate  PgUp/PgDn page  Home/End jump  ←→ sort column  s toggle order  q quit".slice(0, screenWidth)}</Text>
         </Box>
     );
 }
