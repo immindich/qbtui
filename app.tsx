@@ -47,29 +47,35 @@ const columns: Column[] = [
     { name: "Up Speed", key: "upspeed", width: 10, render: (t) => formatBytes(t.upspeed) + "/s", sort: null },
 ];
 
+function viewSlice(line: string, scrollX: number, screenWidth: number): string {
+    return line.slice(scrollX, scrollX + screenWidth);
+}
+
 interface TableRowProps {
     torrent: TorrentInfo;
     selected: boolean;
+    scrollX: number;
     screenWidth: number;
 }
 
-const TableRow = memo(function TableRow({ torrent, selected, screenWidth }: TableRowProps) {
-    const line = (selected ? "* " : "  ") + columns.map((col) => padOrTruncate(col.render(torrent), col.width)).join(" ");
-    return <Text>{line.slice(0, screenWidth)}</Text>;
+const TableRow = memo(function TableRow({ torrent, selected, scrollX, screenWidth }: TableRowProps) {
+    const line = "  " + columns.map((col) => padOrTruncate(col.render(torrent), col.width)).join(" ");
+    return <Text inverse={selected}>{viewSlice(line, scrollX, screenWidth)}</Text>;
 });
 
 interface TableHeaderProps {
     sort_column: number;
     sort_ascending: boolean;
+    scrollX: number;
     screenWidth: number;
 }
 
-function TableHeader({ sort_column, sort_ascending, screenWidth }: TableHeaderProps) {
+function TableHeader({ sort_column, sort_ascending, scrollX, screenWidth }: TableHeaderProps) {
     const line = "  " + columns.map((col, i) => {
         const label = col.name + (i === sort_column ? (sort_ascending ? " ▲" : " ▼") : "");
         return padOrTruncate(label, col.width);
     }).join(" ");
-    return <Text>{line.slice(0, screenWidth)}</Text>;
+    return <Text>{viewSlice(line, scrollX, screenWidth)}</Text>;
 }
 
 interface StatusBarProps {
@@ -85,24 +91,27 @@ function StatusBar({ dl_info_speed, dl_info_data, up_info_speed, up_info_data, s
     return <Text>{line.slice(0, screenWidth)}</Text>;
 }
 
+const tableWidth = 2 + columns.reduce((sum, col) => sum + col.width, 0) + (columns.length - 1);
+
 interface TableProps {
     torrents: TorrentInfo[];
     selected_torrent: string | null;
     scrollOffset: number;
+    scrollX: number;
     maxRows: number;
     sort_column: number;
     sort_ascending: boolean;
     screenWidth: number;
 }
 
-function Table({ torrents, selected_torrent, scrollOffset, maxRows, sort_column, sort_ascending, screenWidth }: TableProps) {
+function Table({ torrents, selected_torrent, scrollOffset, scrollX, maxRows, sort_column, sort_ascending, screenWidth }: TableProps) {
     const visible = maxRows > 0 ? torrents.slice(scrollOffset, scrollOffset + maxRows) : torrents;
 
     return (
         <Box flexDirection="column">
-            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} screenWidth={screenWidth} />
+            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} scrollX={scrollX} screenWidth={screenWidth} />
             <Text>{"─".repeat(screenWidth)}</Text>
-            {visible.map((torrent) => <TableRow torrent={torrent} key={torrent.hash} selected={torrent.hash === selected_torrent} screenWidth={screenWidth} />)}
+            {visible.map((torrent) => <TableRow torrent={torrent} key={torrent.hash} selected={torrent.hash === selected_torrent} scrollX={scrollX} screenWidth={screenWidth} />)}
         </Box>
     )
 }
@@ -145,6 +154,7 @@ export function App({ url, sid }: AppProps) {
     const [state, setState] = useState<TorrentState | null>(null);
     const ridRef = useRef(0);
     const scrollOffsetRef = useRef(0);
+    const scrollXRef = useRef(0);
     const { columns: screenWidth, rows: screenRows } = useTerminalSize();
     const maxRows = screenRows - 5;
 
@@ -192,6 +202,13 @@ export function App({ url, sid }: AppProps) {
                 if (prev === null) return prev;
                 return resortState(prev, { sort_ascending: !prev.sort_ascending });
             });
+        }
+
+        const scrollXDelta = input === "l" ? 4 : input === "h" ? -4 : 0;
+        if (scrollXDelta !== 0) {
+            const maxScrollX = Math.max(0, tableWidth - screenWidth);
+            scrollXRef.current = Math.max(0, Math.min(maxScrollX, scrollXRef.current + scrollXDelta));
+            setState((prev) => prev && { ...prev });
         }
     });
 
@@ -269,11 +286,11 @@ export function App({ url, sid }: AppProps) {
 
     return (
         <Box width="100%" height="100%" flexDirection="column">
-            <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} scrollOffset={scrollOffsetRef.current} sort_column={state.sort_column} sort_ascending={state.sort_ascending} maxRows={maxRows} screenWidth={screenWidth} />
+            <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} scrollOffset={scrollOffsetRef.current} scrollX={scrollXRef.current} sort_column={state.sort_column} sort_ascending={state.sort_ascending} maxRows={maxRows} screenWidth={screenWidth} />
             <Box flexGrow={1} />
             <Text>{"─".repeat(screenWidth)}</Text>
             <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
-            <Text>{"↑↓ navigate  PgUp/PgDn page  Home/End jump  ←→ sort column  s toggle order  q quit".slice(0, screenWidth)}</Text>
+            <Text>{"↑↓ navigate  PgUp/PgDn page  Home/End jump  ←→ sort column  h/l scroll  s toggle order  q quit".slice(0, screenWidth)}</Text>
         </Box>
     );
 }
