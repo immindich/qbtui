@@ -78,7 +78,7 @@ function TableHeader({ sort_column, sort_ascending, sorting, scrollX, screenWidt
     }).join(" ");
 
     if (!sorting) {
-        return <Text>{viewSlice(line, scrollX, screenWidth)}</Text>;
+        return <Text bold>{viewSlice(line, scrollX, screenWidth)}</Text>;
     }
 
     // In sorting mode, highlight the active column
@@ -98,7 +98,7 @@ function TableHeader({ sort_column, sort_ascending, sorting, scrollX, screenWidt
     });
 
     return (
-        <Text>
+        <Text bold>
             {parts.map((p, i) =>
                 p.active ? <Text key={i} inverse>{p.text}</Text> : <Text key={i}>{p.text}</Text>
             )}
@@ -117,6 +117,16 @@ interface StatusBarProps {
 function StatusBar({ dl_info_speed, dl_info_data, up_info_speed, up_info_data, screenWidth }: StatusBarProps) {
     const line = `Download Speed: ${formatBytes(dl_info_speed)}/s  Upload Speed: ${formatBytes(up_info_speed)}/s`;
     return <Text>{line.slice(0, screenWidth)}</Text>;
+}
+
+function HelpBar({ keys }: { keys: [string, string][] }) {
+    return (
+        <Text>
+            {keys.map(([key, desc], i) => (
+                <Text key={i}>{i > 0 ? "  " : ""}<Text bold>{key}</Text> {desc}</Text>
+            ))}
+        </Text>
+    );
 }
 
 const tableWidth = 2 + columns.reduce((sum, col) => sum + col.width, 0) + (columns.length - 1);
@@ -333,10 +343,10 @@ export function App({ url, sid }: AppProps) {
             <Box flexGrow={1} />
             <Text>{"─".repeat(screenWidth)}</Text>
             <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
-            <Text>{(mode === "sorting"
-                ? "Tab column  Space toggle order  Esc done"
-                : "↑↓ navigate  ←→ scroll  PgUp/PgDn page  Home/End jump  s sort  q quit"
-            ).slice(0, screenWidth)}</Text>
+            <HelpBar keys={mode === "sorting"
+                ? [["Tab", "column"], ["Space", "toggle order"], ["Esc", "done"]]
+                : [["↑↓", "navigate"], ["←→", "scroll"], ["PgUp/PgDn", "page"], ["Home/End", "jump"], ["s", "sort"], ["q", "quit"]]
+            } />
         </Box>
     );
 }
