@@ -66,16 +66,44 @@ const TableRow = memo(function TableRow({ torrent, selected, scrollX, screenWidt
 interface TableHeaderProps {
     sort_column: number;
     sort_ascending: boolean;
+    sorting: boolean;
     scrollX: number;
     screenWidth: number;
 }
 
-function TableHeader({ sort_column, sort_ascending, scrollX, screenWidth }: TableHeaderProps) {
+function TableHeader({ sort_column, sort_ascending, sorting, scrollX, screenWidth }: TableHeaderProps) {
     const line = "  " + columns.map((col, i) => {
         const label = col.name + (i === sort_column ? (sort_ascending ? " ▲" : " ▼") : "");
         return padOrTruncate(label, col.width);
     }).join(" ");
-    return <Text>{viewSlice(line, scrollX, screenWidth)}</Text>;
+
+    if (!sorting) {
+        return <Text>{viewSlice(line, scrollX, screenWidth)}</Text>;
+    }
+
+    // In sorting mode, highlight the active column
+    const parts: { text: string; active: boolean }[] = [];
+    let pos = 2; // leading "  "
+    parts.push({ text: viewSlice("  ", scrollX, screenWidth), active: false });
+    columns.forEach((col, i) => {
+        const label = col.name + (i === sort_column ? (sort_ascending ? " ▲" : " ▼") : "");
+        const cell = padOrTruncate(label, col.width);
+        const separator = i < columns.length - 1 ? " " : "";
+        const chunk = cell + separator;
+        const visible = viewSlice(chunk, Math.max(0, scrollX - pos), screenWidth);
+        pos += chunk.length;
+        if (visible.length > 0) {
+            parts.push({ text: visible, active: i === sort_column });
+        }
+    });
+
+    return (
+        <Text>
+            {parts.map((p, i) =>
+                p.active ? <Text key={i} inverse>{p.text}</Text> : <Text key={i}>{p.text}</Text>
+            )}
+        </Text>
+    );
 }
 
 interface StatusBarProps {
@@ -101,15 +129,16 @@ interface TableProps {
     maxRows: number;
     sort_column: number;
     sort_ascending: boolean;
+    sorting: boolean;
     screenWidth: number;
 }
 
-function Table({ torrents, selected_torrent, scrollOffset, scrollX, maxRows, sort_column, sort_ascending, screenWidth }: TableProps) {
+function Table({ torrents, selected_torrent, scrollOffset, scrollX, maxRows, sort_column, sort_ascending, sorting, screenWidth }: TableProps) {
     const visible = maxRows > 0 ? torrents.slice(scrollOffset, scrollOffset + maxRows) : torrents;
 
     return (
         <Box flexDirection="column">
-            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} scrollX={scrollX} screenWidth={screenWidth} />
+            <TableHeader sort_column={sort_column} sort_ascending={sort_ascending} sorting={sorting} scrollX={scrollX} screenWidth={screenWidth} />
             <Text>{"─".repeat(screenWidth)}</Text>
             {visible.map((torrent) => <TableRow torrent={torrent} key={torrent.hash} selected={torrent.hash === selected_torrent} scrollX={scrollX} screenWidth={screenWidth} />)}
         </Box>
@@ -145,6 +174,8 @@ interface TorrentState {
     server_state: TransferInfo;
 }
 
+type Mode = "normal" | "sorting";
+
 interface AppProps {
     url: string;
     sid: string;
@@ -153,6 +184,7 @@ interface AppProps {
 
 export function App({ url, sid }: AppProps) {
     const [state, setState] = useState<TorrentState | null>(null);
+    const [mode, setMode] = useState<Mode>("normal");
     const ridRef = useRef(0);
     const scrollOffsetRef = useRef(0);
     const scrollXRef = useRef(0);
@@ -162,54 +194,64 @@ export function App({ url, sid }: AppProps) {
     const { exit } = useApp();
 
     useInput((input, key) => {
-        if (input === "q") {
-            exit();
-        }
+        if (mode === "normal") {
+            if (input === "q") {
+                exit();
+            }
 
-        const isPage = key.pageUp || key.pageDown;
-        const delta = key.upArrow ? -1 : key.downArrow ? 1 : key.pageUp ? -maxRows : key.pageDown ? maxRows : key.home ? -Infinity : key.end ? Infinity : 0;
-        if (delta !== 0) {
-            setState((prev) => {
-                if (prev === null || prev.torrents_sorted.length === 0) {
-                    return prev;
-                }
+            const isPage = key.pageUp || key.pageDown;
+            const delta = key.upArrow ? -1 : key.downArrow ? 1 : key.pageUp ? -maxRows : key.pageDown ? maxRows : key.home ? -Infinity : key.end ? Infinity : 0;
+            if (delta !== 0) {
+                setState((prev) => {
+                    if (prev === null || prev.torrents_sorted.length === 0) {
+                        return prev;
+                    }
 
-                const len = prev.torrents_sorted.length;
-                const new_index = Math.max(0, Math.min(len - 1, prev.selected_torrent_index + delta));
+                    const len = prev.torrents_sorted.length;
+                    const new_index = Math.max(0, Math.min(len - 1, prev.selected_torrent_index + delta));
 
-                if (isPage) {
-                    scrollOffsetRef.current = Math.max(0, Math.min(len - maxRows, scrollOffsetRef.current + delta));
-                } else if (new_index < scrollOffsetRef.current) {
-                    scrollOffsetRef.current = new_index;
-                } else if (new_index >= scrollOffsetRef.current + maxRows) {
-                    scrollOffsetRef.current = new_index - maxRows + 1;
-                }
+                    if (isPage) {
+                        scrollOffsetRef.current = Math.max(0, Math.min(len - maxRows, scrollOffsetRef.current + delta));
+                    } else if (new_index < scrollOffsetRef.current) {
+                        scrollOffsetRef.current = new_index;
+                    } else if (new_index >= scrollOffsetRef.current + maxRows) {
+                        scrollOffsetRef.current = new_index - maxRows + 1;
+                    }
 
-                return { ...prev, selected_torrent_index: new_index, selected_torrent: prev.torrents_sorted[new_index].hash };
-            });
-        }
+                    return { ...prev, selected_torrent_index: new_index, selected_torrent: prev.torrents_sorted[new_index].hash };
+                });
+            }
 
-        const col_delta = key.rightArrow ? 1 : key.leftArrow ? -1 : 0;
-        if (col_delta !== 0) {
-            setState((prev) => {
-                if (prev === null) return prev;
-                const new_col = (prev.sort_column + col_delta + columns.length) % columns.length;
-                return resortState(prev, { sort_column: new_col });
-            });
-        }
+            const scrollXDelta = key.rightArrow ? 4 : key.leftArrow ? -4 : 0;
+            if (scrollXDelta !== 0) {
+                const maxScrollX = Math.max(0, tableWidth - screenWidth);
+                scrollXRef.current = Math.max(0, Math.min(maxScrollX, scrollXRef.current + scrollXDelta));
+                setState((prev) => prev && { ...prev });
+            }
 
-        if (input === "s") {
-            setState((prev) => {
-                if (prev === null) return prev;
-                return resortState(prev, { sort_ascending: !prev.sort_ascending });
-            });
-        }
+            if (input === "s") {
+                setMode("sorting");
+            }
+        } else if (mode === "sorting") {
+            if (key.escape) {
+                setMode("normal");
+            }
 
-        const scrollXDelta = input === "l" ? 4 : input === "h" ? -4 : 0;
-        if (scrollXDelta !== 0) {
-            const maxScrollX = Math.max(0, tableWidth - screenWidth);
-            scrollXRef.current = Math.max(0, Math.min(maxScrollX, scrollXRef.current + scrollXDelta));
-            setState((prev) => prev && { ...prev });
+            if (key.tab) {
+                const dir = key.shift ? -1 : 1;
+                setState((prev) => {
+                    if (prev === null) return prev;
+                    const new_col = (prev.sort_column + dir + columns.length) % columns.length;
+                    return resortState(prev, { sort_column: new_col });
+                });
+            }
+
+            if (input === " ") {
+                setState((prev) => {
+                    if (prev === null) return prev;
+                    return resortState(prev, { sort_ascending: !prev.sort_ascending });
+                });
+            }
         }
     });
 
@@ -287,11 +329,14 @@ export function App({ url, sid }: AppProps) {
 
     return (
         <Box width="100%" height="100%" flexDirection="column">
-            <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} scrollOffset={scrollOffsetRef.current} scrollX={scrollXRef.current} sort_column={state.sort_column} sort_ascending={state.sort_ascending} maxRows={maxRows} screenWidth={screenWidth} />
+            <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} scrollOffset={scrollOffsetRef.current} scrollX={scrollXRef.current} sort_column={state.sort_column} sort_ascending={state.sort_ascending} sorting={mode === "sorting"} maxRows={maxRows} screenWidth={screenWidth} />
             <Box flexGrow={1} />
             <Text>{"─".repeat(screenWidth)}</Text>
             <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
-            <Text>{"↑↓ navigate  PgUp/PgDn page  Home/End jump  ←→ sort column  h/l scroll  s toggle order  q quit".slice(0, screenWidth)}</Text>
+            <Text>{(mode === "sorting"
+                ? "Tab column  Space toggle order  Esc done"
+                : "↑↓ navigate  ←→ scroll  PgUp/PgDn page  Home/End jump  s sort  q quit"
+            ).slice(0, screenWidth)}</Text>
         </Box>
     );
 }
