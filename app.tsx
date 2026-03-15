@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
-import { getMainData, stopTorrents, startTorrents, TransferInfo, type TorrentInfo } from "./api.js";
+import { getMainData, stopTorrents, startTorrents, HttpError, TransferInfo, type TorrentInfo } from "./api.js";
 import { formatBytes } from "./format.js";
 import { Table, setRawStatus } from "./table.js";
 import { AddTorrentForm } from "./add-torrent-form.js";
@@ -53,11 +53,14 @@ interface AppProps {
     sid: string;
     defaultSavePath: string;
     rawStatus?: boolean;
+    onSessionExpired: () => void;
 }
 
-export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: AppProps) {
+export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp, onSessionExpired }: AppProps) {
     setRawStatus(rawStatusProp ?? false);
     const [state, setState] = useState<AppState | null>(null);
+    const [errored, setErrored] = useState<boolean>(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [mode, setMode] = useState<Mode>("normal");
     const [selectedTorrent, setSelectedTorrent] = useState<string | null>(null);
     const ridRef = useRef(0);
@@ -100,8 +103,23 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
     });
 
     useEffect(() => {
+        ridRef.current = 0;
+
         async function fetchData() {
-            const data = await getMainData(url, sid, ridRef.current);
+            let data;
+            try {
+                data = await getMainData(url, sid, ridRef.current);
+            } catch (error) {
+                if (error instanceof HttpError && error.status === 403) {
+                    onSessionExpired();
+                    return;
+                }
+                setErrored(true);
+                setErrorMessage(error instanceof Error ? error.message : String(error));
+                return;
+            }
+            setErrored(false);
+            setErrorMessage(null);
             ridRef.current = data.rid;
 
             setState((prev) => {
@@ -171,7 +189,10 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
                 }
             </Box>
             <Text>{"─".repeat(screenWidth)}</Text>
-            <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
+            {errored
+                ? <Text color="red">{errorMessage}</Text>
+                : <StatusBar dl_info_speed={state.server_state?.dl_info_speed ?? 0} dl_info_data={state.server_state?.dl_info_data ?? 0} up_info_speed={state.server_state?.up_info_speed ?? 0} up_info_data={state.server_state?.up_info_data ?? 0} screenWidth={screenWidth} />
+            }
             <HelpBar keys={helpKeys} />
         </Box>
     );

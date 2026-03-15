@@ -6,10 +6,11 @@ import { Form } from "./form.js";
 interface LoginProps {
     defaultUrl?: string;
     defaultUsername?: string;
-    onLogin: (url: string, sid: string) => void;
+    message?: string;
+    onLogin: (url: string, sid: string, username: string, password: string) => void;
 }
 
-export function Login({ defaultUrl, defaultUsername, onLogin }: LoginProps) {
+export function Login({ defaultUrl, defaultUsername, message, onLogin }: LoginProps) {
     const [url, setUrl] = useState(defaultUrl ?? "");
     const [username, setUsername] = useState(defaultUsername ?? "");
     const [password, setPassword] = useState("");
@@ -23,7 +24,7 @@ export function Login({ defaultUrl, defaultUsername, onLogin }: LoginProps) {
         setLoading(true);
         setError(null);
         authenticate(url, username, password)
-            .then((sid) => onLogin(url, sid))
+            .then((sid) => onLogin(url, sid, username, password))
             .catch((err) => {
                 setError(err instanceof Error ? err.message : String(err));
                 setLoading(false);
@@ -43,6 +44,7 @@ export function Login({ defaultUrl, defaultUsername, onLogin }: LoginProps) {
                 onSubmit={handleSubmit}
             />
             {loading && <Text color="yellow">Authenticating...</Text>}
+            {message && !error && <Text color="yellow">{message}</Text>}
             {error && <Text color="red">{error}</Text>}
             <Text dimColor>Tab to switch fields, Enter to login</Text>
         </>

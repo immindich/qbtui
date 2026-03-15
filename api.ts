@@ -1,3 +1,9 @@
+export class HttpError extends Error {
+    constructor(public status: number, message: string) {
+        super(message);
+    }
+}
+
 export interface TorrentInfo {
     hash: string;
     name: string;
@@ -62,7 +68,7 @@ export async function authenticate(
     });
 
     if (!response.ok) {
-        throw new Error(`Authentication failed: HTTP ${response.status}`);
+        throw new HttpError(response.status, `Authentication failed: HTTP ${response.status}`);
     }
 
     const setCookie = response.headers.get("set-cookie");
@@ -83,7 +89,7 @@ export async function getDefaultSavePath(
     });
 
     if (!response.ok) {
-        throw new Error(`Failed to get default save path: HTTP ${response.status}`);
+        throw new HttpError(response.status, `Failed to get default save path: HTTP ${response.status}`);
     }
 
     return response.text();
@@ -102,7 +108,7 @@ export async function getTorrents(
     );
 
     if (!response.ok) {
-        throw new Error(`Failed to get torrents: HTTP ${response.status}`);
+        throw new HttpError(response.status, `Failed to get torrents: HTTP ${response.status}`);
     }
 
     return response.json() as Promise<TorrentInfo[]>;
@@ -158,7 +164,7 @@ export async function addTorrents(
     });
 
     if (!response.ok) {
-        throw new Error(`Failed to add torrent: HTTP ${response.status}`);
+        throw new HttpError(response.status, `Failed to add torrent: HTTP ${response.status}`);
     }
 
     const text = await response.text();
@@ -173,7 +179,7 @@ export async function stopTorrents(url: string, sid: string, hashes: string[]): 
         headers: { Cookie: `SID=${sid}`, "Content-Type": "application/x-www-form-urlencoded" },
         body: `hashes=${hashes.join("|")}`,
     });
-    if (!response.ok) throw new Error(`Failed to stop torrent: HTTP ${response.status}`);
+    if (!response.ok) throw new HttpError(response.status, `Failed to stop torrent: HTTP ${response.status}`);
 }
 
 export async function startTorrents(url: string, sid: string, hashes: string[]): Promise<void> {
@@ -182,7 +188,7 @@ export async function startTorrents(url: string, sid: string, hashes: string[]):
         headers: { Cookie: `SID=${sid}`, "Content-Type": "application/x-www-form-urlencoded" },
         body: `hashes=${hashes.join("|")}`,
     });
-    if (!response.ok) throw new Error(`Failed to start torrent: HTTP ${response.status}`);
+    if (!response.ok) throw new HttpError(response.status, `Failed to start torrent: HTTP ${response.status}`);
 }
 
 export async function getMainData(
@@ -198,7 +204,7 @@ export async function getMainData(
     );
 
     if (!response.ok) {
-        throw new Error(`Failed to get maindata: HTTP ${response.status}`);
+        throw new HttpError(response.status, `Failed to get maindata: HTTP ${response.status}`);
     }
 
     return response.json() as Promise<MainData>;
