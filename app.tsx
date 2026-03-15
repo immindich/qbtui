@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { getMainData, stopTorrents, startTorrents, TransferInfo, type TorrentInfo } from "./api.js";
 import { formatBytes } from "./format.js";
-import { Table, columns, setRawStatus } from "./table.js";
+import { Table, setRawStatus } from "./table.js";
 import { AddTorrentForm } from "./add-torrent-form.js";
 
 function useTerminalSize() {
@@ -41,32 +41,8 @@ function HelpBar({ keys }: { keys: [string, string][] }) {
     );
 }
 
-function resortState(prev: TorrentState, overrides: Partial<Pick<TorrentState, "torrents" | "sort_column" | "sort_ascending">> = {}): TorrentState {
-    const torrents = overrides.torrents ?? prev.torrents;
-    const sort_column = overrides.sort_column ?? prev.sort_column;
-    const sort_ascending = overrides.sort_ascending ?? prev.sort_ascending;
-
-    const col = columns[sort_column];
-    const dir = sort_ascending ? 1 : -1;
-    const compare = col.sort ?? ((a: TorrentInfo, b: TorrentInfo) => (a[col.key] as number) - (b[col.key] as number));
-    const torrents_sorted = Object.values(torrents).sort((a, b) => compare(a, b) * dir);
-
-    const still_exists = prev.selected_torrent !== null && torrents[prev.selected_torrent] !== undefined;
-    const selected_torrent = still_exists ? prev.selected_torrent : (torrents_sorted[0]?.hash ?? null);
-    const selected_torrent_index = selected_torrent
-        ? torrents_sorted.findIndex((t) => t.hash === selected_torrent)
-        : 0;
-
-    return { torrents, torrents_sorted, selected_torrent, selected_torrent_index, sort_column, sort_ascending, server_state: prev.server_state };
-}
-
-interface TorrentState {
+interface AppState {
     torrents: Record<string, TorrentInfo>;
-    torrents_sorted: TorrentInfo[];
-    selected_torrent: string | null;
-    selected_torrent_index: number;
-    sort_column: number;
-    sort_ascending: boolean;
     server_state: TransferInfo;
 }
 
@@ -81,8 +57,9 @@ interface AppProps {
 
 export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: AppProps) {
     setRawStatus(rawStatusProp ?? false);
-    const [state, setState] = useState<TorrentState | null>(null);
+    const [state, setState] = useState<AppState | null>(null);
     const [mode, setMode] = useState<Mode>("normal");
+    const [selectedTorrent, setSelectedTorrent] = useState<string | null>(null);
     const ridRef = useRef(0);
     const { columns: screenWidth, rows: screenRows } = useTerminalSize();
     const maxRows = screenRows - 5;
@@ -95,20 +72,6 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
                 exit();
             }
 
-            const delta = key.upArrow ? -1 : key.downArrow ? 1 : key.pageUp ? -maxRows : key.pageDown ? maxRows : key.home ? -Infinity : key.end ? Infinity : 0;
-            if (delta !== 0) {
-                setState((prev) => {
-                    if (prev === null || prev.torrents_sorted.length === 0) {
-                        return prev;
-                    }
-
-                    const len = prev.torrents_sorted.length;
-                    const new_index = Math.max(0, Math.min(len - 1, prev.selected_torrent_index + delta));
-
-                    return { ...prev, selected_torrent_index: new_index, selected_torrent: prev.torrents_sorted[new_index].hash };
-                });
-            }
-
             if (input === "s") {
                 setMode("sorting");
             }
@@ -118,15 +81,12 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
             }
 
             if (input === "p") {
-                setState((prev) => {
-                    if (prev === null || prev.selected_torrent === null) return prev;
-                    const torrent = prev.torrents[prev.selected_torrent];
-                    if (!torrent) return prev;
-                    const stopped = ["stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].includes(torrent.state);
-                    const action = stopped ? startTorrents : stopTorrents;
-                    action(url, sid, [torrent.hash]).catch(() => {});
-                    return prev;
-                });
+                if (state === null || selectedTorrent === null) return;
+                const torrent = state.torrents[selectedTorrent];
+                if (!torrent) return;
+                const stopped = ["stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].includes(torrent.state);
+                const action = stopped ? startTorrents : stopTorrents;
+                action(url, sid, [torrent.hash]).catch(() => {});
             }
         } else if (mode === "add-torrent") {
             if (key.escape) {
@@ -135,22 +95,6 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
         } else if (mode === "sorting") {
             if (key.escape) {
                 setMode("normal");
-            }
-
-            if (key.tab) {
-                const dir = key.shift ? -1 : 1;
-                setState((prev) => {
-                    if (prev === null) return prev;
-                    const new_col = (prev.sort_column + dir + columns.length) % columns.length;
-                    return resortState(prev, { sort_column: new_col });
-                });
-            }
-
-            if (input === " ") {
-                setState((prev) => {
-                    if (prev === null) return prev;
-                    return resortState(prev, { sort_ascending: !prev.sort_ascending });
-                });
             }
         }
     });
@@ -199,17 +143,7 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
                     ...data.server_state,
                 };
 
-                const base: TorrentState = prev ?? {
-                    torrents,
-                    torrents_sorted: [],
-                    selected_torrent: null,
-                    selected_torrent_index: 0,
-                    sort_column: 0,
-                    sort_ascending: true,
-                    server_state,
-                };
-
-                return { ...resortState(base, { torrents }), server_state };
+                return { torrents, server_state };
             });
         }
 
@@ -233,7 +167,7 @@ export function App({ url, sid, defaultSavePath, rawStatus: rawStatusProp }: App
             <Box flexGrow={1} flexDirection="column">
                 {mode === "add-torrent"
                     ? <AddTorrentForm serverUrl={url} sid={sid} defaultSavePath={defaultSavePath} onClose={() => setMode("normal")} />
-                    : <Table torrents={state.torrents_sorted} selected_torrent={state.selected_torrent} selected_torrent_index={state.selected_torrent_index} sort_column={state.sort_column} sort_ascending={state.sort_ascending} sorting={mode === "sorting"} maxRows={maxRows} screenWidth={screenWidth} />
+                    : <Table torrents={state.torrents} sorting={mode === "sorting"} maxRows={maxRows} screenWidth={screenWidth} onSelectionChange={setSelectedTorrent} />
                 }
             </Box>
             <Text>{"─".repeat(screenWidth)}</Text>
